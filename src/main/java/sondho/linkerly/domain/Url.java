@@ -17,7 +17,7 @@ import java.time.LocalDateTime;
 public class Url {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
+    @GeneratedValue(strategy = GenerationType.AUTO)
     private Long id;
 
     @Column(name = "original_url")
