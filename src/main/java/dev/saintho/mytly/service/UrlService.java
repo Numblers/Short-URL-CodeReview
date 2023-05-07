@@ -1,21 +1,24 @@
 package dev.saintho.mytly.service;
 
-
 import static dev.saintho.mytly.exception.ExceptionType.*;
 
+import java.net.URI;
 import java.util.Optional;
 
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import dev.saintho.mytly.dto.command.UrlDeleteCommand;
-import dev.saintho.mytly.dto.command.UrlShortCommand;
-import dev.saintho.mytly.entity.Url;
+import dev.saintho.mytly.api.v1.urls.dto.command.UrlDeleteByShortenedCommand;
+import dev.saintho.mytly.api.v1.urls.dto.command.UrlShortCommand;
+import dev.saintho.mytly.api.v1.urls.dto.query.UrlRedirectQuery;
+import dev.saintho.mytly.api.v1.urls.dto.result.UrlShortResult;
+import dev.saintho.mytly.domain.entity.Url;
 import dev.saintho.mytly.event.dto.UrlCreateEvent;
+import dev.saintho.mytly.event.dto.UrlRedirectEvent;
 import dev.saintho.mytly.exception.MytlyException;
 import dev.saintho.mytly.generator.url.UrlGenerator;
-import dev.saintho.mytly.repository.UrlRepository;
+import dev.saintho.mytly.repository.jpa.url.UrlRepository;
 import lombok.RequiredArgsConstructor;
 
 @Service
@@ -26,17 +29,29 @@ public class UrlService {
 	private final UrlGenerator urlGenerator;
 	private final ApplicationEventPublisher eventPublisher;
 
-	public Url shortUrl(UrlShortCommand command) {
-		Optional<Url> urlOptional = urlRepository.findByOriginal(command.getOriginal());
+	public URI getRedirectUrl(UrlRedirectQuery query) {
+		Url url = findVerifiedOneByShortened(query.getShortened());
+		url.checkAvailalbleAtTheTime(query.getRedirectDateTime());
 
-		return urlOptional
+		eventPublisher.publishEvent(
+			UrlRedirectEvent.of(url, query.getReferer(), query.getRedirectDateTime()));
+
+		return URI.create(url.getOriginal());
+	}
+
+	public UrlShortResult shortUrl(UrlShortCommand command) {
+		Optional<Url> urlOptional = urlRepository.findLatestOneByOriginal(command.getOriginal());
+
+		Url verified = urlOptional
 			.map(url -> reRequestUrl(url, command))
 			.orElseGet(() -> createUrl(command));
 
+		return UrlShortResult.from(verified);
+
 	}
-	public void deleteUrl(UrlDeleteCommand command) {
+	public void deleteUrlByShortened(UrlDeleteByShortenedCommand command) {
 		Url url = findVerifiedOneByShortened(command.getShortened());
-		urlRepository.delete(url);
+		url.softDelete();
 	}
 
 	@Transactional(readOnly = true)
@@ -45,16 +60,20 @@ public class UrlService {
 
 		return urlOptional
 			.orElseThrow(
-				() -> new MytlyException(URL_NOT_FOUND, "URL_ENTITY_CORRESPONDING_SUCH_SHORTENED_URL_NOT_FOUND"));
+				() -> new MytlyException(URL_NOT_FOUND, "Url corresponding such shrotened url is not found"));
 	}
 
 	private Url reRequestUrl(Url url, UrlShortCommand command) {
+		if (!url.isAvailableAtTheTime(command.getRequestedAt())) {
+			return createUrl(command);
+		}
+
 		if (command.getIsExpirable()) {
-			url.updateExpirationOption(true, command.getExpirationPeriod());
+			url.updateExpirationOption(true, command.getExpireAt());
 			return url;
 		}
 
-		url.setIsNotExpirable();
+		url.setNotExpirable();
 		return url;
 	}
 
@@ -83,7 +102,7 @@ public class UrlService {
 				.shortened(shortened)
 				.original(command.getOriginal())
 				.isExpirable(true)
-				.expireAt(command.getExpirationPeriod().getExpireAt())
+				.expireAt(command.getExpireAt())
 				.build();
 		}
 
