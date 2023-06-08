@@ -24,7 +24,7 @@ public class QUrl extends EntityPathBase<Url> {
     //inherited
     public final DateTimePath<java.time.LocalDateTime> createdTime = _super.createdTime;
 
-    public final StringPath expiredTime = createString("expiredTime");
+    public final DateTimePath<java.time.LocalDateTime> expiredTime = createDateTime("expiredTime", java.time.LocalDateTime.class);
 
     public final NumberPath<Long> id = createNumber("id", Long.class);
 
